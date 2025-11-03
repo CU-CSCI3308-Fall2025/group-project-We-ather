@@ -1,0 +1,20 @@
+{
+  "name": "we-ather",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "prestart": "npm install",
+    "start": "nodemon index.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.0",
+    "body-parser": "1.20.0",
+    "express": "^4.18.2",
+    "express-session": "1.17.3",
+    "pg-promise": "^10.11.1",
+    "nodemon": "2.0.20"
+  }
+}
+
+
