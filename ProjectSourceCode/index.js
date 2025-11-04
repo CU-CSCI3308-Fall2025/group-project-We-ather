@@ -4,6 +4,7 @@ const bodyParser = require('body-parser');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const pgp = require('pg-promise')();
+const fs = require('fs');
 
 const app = express();
 
@@ -61,17 +62,25 @@ app.get('/login', (_req, res) => {
 app.post('/login', async (req, res) => {
   const { username, password } = req.body;
   try {
+    if (!username || !password) {
+      return res.redirect('/login?error=' + encodeURIComponent('Username and password are required'));
+    }
+
     const user = await db.oneOrNone('SELECT * FROM users WHERE username = $1', [username]);
-    if (!user) return res.redirect('/register');
+    if (!user) {
+      return res.redirect('/login?error=' + encodeURIComponent('User not found. Please register first.'));
+    }
 
     const match = await bcrypt.compare(password, user.password);
-    if (!match) return res.redirect('/login');
+    if (!match) {
+      return res.redirect('/login?error=' + encodeURIComponent('Incorrect password. Please try again.'));
+    }
 
     req.session.user = { id: user.id, username: user.username };
     req.session.save(() => res.redirect('/home'));
   } catch (e) {
     console.error('Login error:', e.message);
-    res.redirect('/login');
+    res.redirect('/login?error=' + encodeURIComponent('An error occurred during login. Please try again.'));
   }
 });
 
@@ -92,12 +101,16 @@ app.post('/register', async (req, res) => {
 });
 
 app.get('/home', auth, (req, res) => {
-  res.send(
-    `<div style="font-family:system-ui;padding:24px;">
-      <h1>Welcome, ${req.session.user.username}</h1>
-      <p>You are logged in. <a href="/logout">Logout</a></p>
-    </div>`
-  );
+  const homePath = path.join(viewsDir, 'home.html');
+  fs.readFile(homePath, 'utf8', (err, data) => {
+    if (err) {
+      console.error('Error reading home.html:', err);
+      return res.status(500).send('Error loading home page');
+    }
+    // Replace placeholder with actual username
+    const html = data.replace('{{USERNAME}}', req.session.user.username);
+    res.send(html);
+  });
 });
 
 app.get('/logout', (req, res) => {
