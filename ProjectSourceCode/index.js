@@ -8,6 +8,7 @@ const fs = require('fs');
 
 const handlebars = require('express-handlebars');
 const Handlebars = require('handlebars');
+const weatherService = require('./services/weather');
 
 const app = express();
 
@@ -124,6 +125,27 @@ const auth = (req, res, next) => {
   }
   next();
 };
+
+// Weather API route (protected by auth)
+app.get('/api/weather', auth, async (req, res) => {
+  const { lat, lon } = req.query;
+  
+  if (!lat || !lon) {
+    return res.status(400).json({ error: 'Latitude and longitude are required' });
+  }
+  
+  try {
+    const weatherData = await weatherService.getWeatherData(parseFloat(lat), parseFloat(lon));
+    res.json(weatherData);
+  } catch (error) {
+    console.error('Error fetching weather:', error.message);
+    console.error('Stack:', error.stack);
+    res.status(500).json({ 
+      error: 'Failed to fetch weather data',
+      message: error.message 
+    });
+  }
+});
 
 app.use(auth);
 
