@@ -110,6 +110,7 @@ app.get('/home', (req, res) => {
   res.render('pages/home', {
     layout: 'main',
     username: req.session.user.username,
+    posts: [],
   });
 });
 

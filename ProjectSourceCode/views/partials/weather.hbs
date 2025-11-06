@@ -1,0 +1,197 @@
+<div>
+    <div class="card shadow-sm">
+        <div class="card-header d-flex justify-content-between align-items-center">
+        <h4 class="m-0">Current Weather</h4>
+        <button id="refreshWeather" class="btn btn-sm btn-outline-primary" onclick="loadWeather()">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+        </div>
+        <div class="card-body">
+        <div id="weatherLoading" class="text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2 text-muted">Loading weather data...</p>
+        </div>
+        <div id="weatherError" class="alert alert-danger d-none" role="alert">
+            <strong>Error:</strong> <span id="errorMessage"></span>
+        </div>
+        <div id="weatherContent" class="d-none">
+            <div class="mb-3">
+            <h5 id="weatherLocation" class="mb-2"></h5>
+            <div class="d-flex align-items-center mb-3">
+                <div class="flex-grow-1">
+                <h2 class="mb-0" id="weatherTemp"></h2>
+                <p class="text-muted mb-0" id="weatherDescription"></p>
+                </div>
+                <div class="ms-3">
+                <i id="weatherIcon" class="bi" style="font-size: 3rem;"></i>
+                </div>
+            </div>
+            <div class="row g-3">
+                <div class="col-6">
+                <small class="text-muted">Wind</small>
+                <p class="mb-0" id="weatherWind"></p>
+                </div>
+                <div class="col-6">
+                <small class="text-muted">Humidity</small>
+                <p class="mb-0" id="weatherHumidity"></p>
+                </div>
+            </div>
+            </div>
+            <hr>
+            <div>
+            <h6 class="mb-2">Forecast</h6>
+            <div id="weatherForecast" class="row g-2"></div>
+            </div>
+        </div>
+        </div>
+    </div>
+
+    <script>
+    // Get user's location and load weather
+    function loadWeather() {
+      const loadingEl = document.getElementById('weatherLoading');
+      const errorEl = document.getElementById('weatherError');
+      const contentEl = document.getElementById('weatherContent');
+      const errorMessageEl = document.getElementById('errorMessage');
+      
+      // Show loading, hide error and content
+      loadingEl.classList.remove('d-none');
+      errorEl.classList.add('d-none');
+      contentEl.classList.add('d-none');
+      
+      if (!navigator.geolocation) {
+        showError('Geolocation is not supported by your browser.');
+        return;
+      }
+      
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const lat = position.coords.latitude;
+          const lon = position.coords.longitude;
+          
+          try {
+            const response = await fetch(`/api/weather?lat=${lat}&lon=${lon}`);
+            const data = await response.json();
+            
+            if (!response.ok) {
+              throw new Error(data.message || data.error || 'Failed to fetch weather data');
+            }
+            
+            displayWeather(data);
+          } catch (error) {
+            showError(error.message);
+          }
+        },
+        (error) => {
+          let message = 'Unable to get your location. ';
+          switch(error.code) {
+            case error.PERMISSION_DENIED:
+              message += 'Please allow location access.';
+              break;
+            case error.POSITION_UNAVAILABLE:
+              message += 'Location information is unavailable.';
+              break;
+            case error.TIMEOUT:
+              message += 'Location request timed out.';
+              break;
+            default:
+              message += 'An unknown error occurred.';
+          }
+          showError(message);
+        }
+      );
+    }
+    
+    function showError(message) {
+      const loadingEl = document.getElementById('weatherLoading');
+      const errorEl = document.getElementById('weatherError');
+      const contentEl = document.getElementById('weatherContent');
+      const errorMessageEl = document.getElementById('errorMessage');
+      
+      loadingEl.classList.add('d-none');
+      errorEl.classList.remove('d-none');
+      contentEl.classList.add('d-none');
+      errorMessageEl.textContent = message;
+    }
+    
+    function displayWeather(data) {
+      const loadingEl = document.getElementById('weatherLoading');
+      const errorEl = document.getElementById('weatherError');
+      const contentEl = document.getElementById('weatherContent');
+      
+      loadingEl.classList.add('d-none');
+      errorEl.classList.add('d-none');
+      contentEl.classList.remove('d-none');
+      
+      // Display location
+      const location = data.location;
+      document.getElementById('weatherLocation').textContent = 
+        `${location.city}, ${location.state}`;
+      
+      // Display current weather
+      if (data.current) {
+        const current = data.current;
+        document.getElementById('weatherTemp').textContent = 
+          `${current.temperature}°${current.temperatureUnit || 'F'}`;
+        document.getElementById('weatherDescription').textContent = 
+          current.shortForecast || current.detailedForecast || '';
+        document.getElementById('weatherWind').textContent = 
+          current.windSpeed ? `${current.windSpeed} ${current.windDirection || ''}` : 'N/A';
+        const humidity = current.relativeHumidity;
+        const humidityValue = humidity ? (typeof humidity === 'object' ? humidity.value : humidity) : null;
+        document.getElementById('weatherHumidity').textContent = 
+          humidityValue ? `${humidityValue}%` : 'N/A';
+        
+        // Set weather icon based on forecast
+        const iconEl = document.getElementById('weatherIcon');
+        const forecast = (current.shortForecast || '').toLowerCase();
+        if (forecast.includes('sunny') || forecast.includes('clear')) {
+          iconEl.className = 'bi bi-sun-fill text-warning';
+        } else if (forecast.includes('cloud')) {
+          iconEl.className = 'bi bi-cloud-fill text-secondary';
+        } else if (forecast.includes('rain')) {
+          iconEl.className = 'bi bi-cloud-rain-fill text-primary';
+        } else if (forecast.includes('snow')) {
+          iconEl.className = 'bi bi-snow text-info';
+        } else if (forecast.includes('storm') || forecast.includes('thunder')) {
+          iconEl.className = 'bi bi-lightning-fill text-warning';
+        } else {
+          iconEl.className = 'bi bi-cloud text-secondary';
+        }
+      }
+      
+      // Display forecast
+      const forecastEl = document.getElementById('weatherForecast');
+      forecastEl.innerHTML = '';
+      
+      if (data.forecast && data.forecast.length > 0) {
+        // Show first 5 periods
+        data.forecast.slice(0, 5).forEach(period => {
+          const col = document.createElement('div');
+          col.className = 'col-12 col-sm-6 col-md-4';
+          
+          const card = document.createElement('div');
+          card.className = 'card border-0 bg-light';
+          
+          const cardBody = document.createElement('div');
+          cardBody.className = 'card-body p-2';
+          
+          cardBody.innerHTML = `
+            <small class="text-muted d-block">${period.name || ''}</small>
+            <strong>${period.temperature}°${period.temperatureUnit || 'F'}</strong>
+            <small class="d-block text-muted">${period.shortForecast || ''}</small>
+          `;
+          
+          card.appendChild(cardBody);
+          col.appendChild(card);
+          forecastEl.appendChild(col);
+        });
+      }
+    }
+    
+    // Load weather on page load
+    document.addEventListener('DOMContentLoaded', loadWeather);
+  </script>
+</div>

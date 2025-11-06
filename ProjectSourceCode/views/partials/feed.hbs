@@ -1,0 +1,14 @@
+<div class="container pb-10 m-10">
+  <h3>Feed</h3>
+  {{#if posts.length}}
+    <div class="row">
+        {{#each posts}}
+        <div class="col-md-4 mt-4">
+            Result
+        </div>
+        {{/each}}
+    </div>
+  {{else}}
+  <p>No posts found at this location.</p>
+  {{/if}}
+</div>
