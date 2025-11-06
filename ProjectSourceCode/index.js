@@ -67,6 +67,10 @@ app.get('/', (req, res) => {
   res.redirect('/login');
 });
 
+app.get('/welcome', (req, res) => {
+  res.json({status: 'success', message: 'Welcome!'});
+});
+
 app.get('/login', (req, res) => {
   res.render('pages/login', { layout: 'main' });
 });
@@ -150,14 +154,19 @@ app.get('/api/weather', auth, async (req, res) => {
 
 app.use(auth);
 
-// Start
-ensureSchema()
-  .then(() => {
-    app.listen(3000, () => console.log('Server listening on 3000'));
-  })
-  .catch((e) => {
-    console.error('Failed to init schema:', e.message);
-    process.exit(1);
-  });
+// Export the app for testing
+module.exports = app;
+
+// Start server if this is the main module
+if (require.main === module) {
+  ensureSchema()
+    .then(() => {
+      app.listen(3000, () => console.log('Server listening on 3000'));
+    })
+    .catch((e) => {
+      console.error('Failed to init schema:', e.message);
+      process.exit(1);
+    });
+}
 
 
