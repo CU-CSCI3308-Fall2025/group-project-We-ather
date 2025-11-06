@@ -98,11 +98,15 @@ app.get('/register', (req, res) => {
 });
 
 app.post('/register', async (req, res) => {
+  if (!req.body.username || !req.body.password || req.body.username.trim() === '' || req.body.password.trim() === '') {
+    return res.status(400).json({ message: 'Invalid input' });
+  }
+
   const hash = await bcrypt.hash(req.body.password, 10);
     const insertQuery = 'INSERT INTO users (username, password) VALUES ($1, $2)';
     try {
       await db.none(insertQuery, [req.body.username, hash])
-      return res.redirect('/login');
+      return res.status(200).redirect('/login');
     } 
     catch (error) {
         console.error('Error inserting user:', error); 

@@ -30,3 +30,34 @@ describe('Server!', () => {
 // *********************** TODO: WRITE 2 UNIT TESTCASES **************************
 
 // ********************************************************************************
+
+describe('Testing Add User API', () => {
+  it('positive : /register', done => {
+    chai
+      .request(app)
+      .post('/register')
+      .send({
+        username: 'testuser',
+        password: 'testpassword123'
+      })
+      .end((err, res) => {
+        expect(res).to.have.status(200);
+        done();
+      });
+  });
+
+  it('Negative : /register. Checking invalid name', done => {
+    chai
+      .request(app)
+      .post('/register')
+      .send({
+        username: null,
+        password: 'testpassword123'
+      })      
+      .end((err, res) => {
+        expect(res).to.have.status(400);
+        expect(res.body.message).to.equals('Invalid input');
+        done();
+      });
+  });
+});
