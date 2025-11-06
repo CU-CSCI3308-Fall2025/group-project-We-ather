@@ -6,7 +6,16 @@ const bcrypt = require('bcryptjs');
 const pgp = require('pg-promise')();
 const fs = require('fs');
 
+const handlebars = require('express-handlebars');
+const Handlebars = require('handlebars');
+
 const app = express();
+
+const hbs = handlebars.create({
+  extname: 'hbs',
+  layoutsDir: __dirname + '/views/layouts',
+  partialsDir: __dirname + '/views/partials',
+});
 
 // Database configuration (from environment; docker compose provides these)
 const dbConfig = {
@@ -31,6 +40,12 @@ async function ensureSchema() {
   `);
 }
 
+// Register `hbs` as our view engine using its bound `engine()` function.
+app.engine('hbs', hbs.engine);
+app.set('view engine', 'hbs');
+app.set('views', path.join(__dirname, 'views'));
+app.use(bodyParser.json()); // specify the usage of JSON for parsing request body.
+
 // Middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -43,79 +58,74 @@ app.use(
   })
 );
 
-// Simple auth guard
-function auth(req, res, next) {
-  if (!req.session.user) return res.redirect('/login');
-  next();
-}
-
 // Static views directory for HTML pages
 const viewsDir = path.join(__dirname, 'views');
 
 // Routes
-app.get('/', (_req, res) => res.redirect('/login'));
+app.get('/', (req, res) => {
+  res.redirect('/login');
+});
 
-app.get('/login', (_req, res) => {
-  res.sendFile(path.join(viewsDir, 'login.html'));
+app.get('/login', (req, res) => {
+  res.render('pages/login', { layout: 'main' });
 });
 
 app.post('/login', async (req, res) => {
-  const { username, password } = req.body;
-  try {
-    if (!username || !password) {
-      return res.redirect('/login?error=' + encodeURIComponent('Username and password are required'));
+    const query = 'SELECT * FROM users WHERE username = $1';
+    try {
+        const user = await db.one(query, [req.body.username]);
+        const match = await bcrypt.compare(req.body.password, user.password);
+        if (match) {
+            req.session.user = user;
+            req.session.save(); 
+            return res.redirect('/home');
+        }
+        return res.status(401).render('pages/login', { layout: 'main', message: 'Invalid username or password.', error: true });
+    } 
+    catch (error) {
+        console.error('Error fetching user:', error); 
+        return res.status(500).redirect('/register');
     }
-
-    const user = await db.oneOrNone('SELECT * FROM users WHERE username = $1', [username]);
-    if (!user) {
-      return res.redirect('/login?error=' + encodeURIComponent('User not found. Please register first.'));
-    }
-
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) {
-      return res.redirect('/login?error=' + encodeURIComponent('Incorrect password. Please try again.'));
-    }
-
-    req.session.user = { id: user.id, username: user.username };
-    req.session.save(() => res.redirect('/home'));
-  } catch (e) {
-    console.error('Login error:', e.message);
-    res.redirect('/login?error=' + encodeURIComponent('An error occurred during login. Please try again.'));
-  }
 });
 
-app.get('/register', (_req, res) => {
-  res.sendFile(path.join(viewsDir, 'register.html'));
+app.get('/register', (req, res) => {
+  res.render('pages/register', { layout: 'main' });
 });
 
 app.post('/register', async (req, res) => {
-  const { username, password } = req.body;
-  try {
-    const hash = await bcrypt.hash(password, 10);
-    await db.none('INSERT INTO users(username, password) VALUES($1, $2)', [username, hash]);
-    res.redirect('/login');
-  } catch (e) {
-    console.error('Registration error:', e.message);
-    res.redirect('/register');
-  }
+  const hash = await bcrypt.hash(req.body.password, 10);
+    const insertQuery = 'INSERT INTO users (username, password) VALUES ($1, $2)';
+    try {
+      await db.none(insertQuery, [req.body.username, hash])
+      return res.redirect('/login');
+    } 
+    catch (error) {
+        console.error('Error inserting user:', error); 
+        return res.status(500).redirect('/register');
+    }
 });
 
-app.get('/home', auth, (req, res) => {
-  const homePath = path.join(viewsDir, 'home.html');
-  fs.readFile(homePath, 'utf8', (err, data) => {
-    if (err) {
-      console.error('Error reading home.html:', err);
-      return res.status(500).send('Error loading home page');
-    }
-    // Replace placeholder with actual username
-    const html = data.replace('{{USERNAME}}', req.session.user.username);
-    res.send(html);
+app.get('/home', (req, res) => {
+  res.render('pages/home', {
+    layout: 'main',
+    username: req.session.user.username,
   });
 });
 
-app.get('/logout', (req, res) => {
-  req.session.destroy(() => res.redirect('/login'));
-});
+app.get('/logout', async (req, res) => {
+    req.session.destroy()
+    res.render('pages/logout', {layout: 'main', message: 'Logged out Successfully', error:false})
+})
+
+// Simple auth guard
+const auth = (req, res, next) => {
+  if (!req.session.user) {
+    return res.redirect('/login');
+  }
+  next();
+};
+
+app.use(auth);
 
 // Start
 ensureSchema()
