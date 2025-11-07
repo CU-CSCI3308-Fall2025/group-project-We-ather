@@ -39,6 +39,17 @@ async function ensureSchema() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
+  await db.none(`
+    CREATE TABLE IF NOT EXISTS locations (
+      id SERIAL PRIMARY KEY,
+      name TEXT UNIQUE NOT NULL
+    );
+  `);
+
+  const sampleLocations = ['Boulder', 'Boston', 'Boise', 'Baltimore', 'Bangkok'];
+  for (const loc of sampleLocations) {
+    await db.none('INSERT INTO locations(name) VALUES($1) ON CONFLICT DO NOTHING', [loc]);
+  }
 }
 
 // Register `hbs` as our view engine using its bound `engine()` function.
@@ -155,6 +166,24 @@ app.get('/api/weather', auth, async (req, res) => {
     });
   }
 });
+
+//autocomplete location names route (protected by auth)
+app.get('/api/locations', auth, async (req, res) => {
+  const { query } = req.query;
+
+  if (!query) {
+    return res.status(400).json({ error: 'Query parameter is required' });
+  }
+
+  try {
+    const locations = await db.any('SELECT name FROM locations WHERE name ILIKE $1 LIMIT 10', [`%${query}%`]);
+    res.json(locations.map(loc => loc.name));
+  } catch (error) {
+    console.error('Error fetching locations:', error.message);
+    res.status(500).json({ error: 'Failed to fetch locations' });
+  }
+});
+
 
 app.use(auth);
 
