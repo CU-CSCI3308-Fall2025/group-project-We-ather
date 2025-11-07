@@ -88,6 +88,7 @@ async function getWeatherData2(lat, lon) {
  * @returns {Promise<Object>} Parsed JSON response
  */
 function makeRequest(urlString) {
+  console.log('Making request to:', urlString);
   return new Promise((resolve, reject) => {
     if (!urlString) {
       return reject(new Error('URL is required'));

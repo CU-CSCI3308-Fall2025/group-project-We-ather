@@ -29,4 +29,29 @@ describe('Server!', () => {
 
 // *********************** TODO: WRITE 2 UNIT TESTCASES **************************
 
+
+  it('GET /api/weather has code 200', function (done) {
+    this.timeout(10000);
+
+    const lat = 40.0065865220012;
+    const lon = -105.26331967016468;
+
+    chai
+      .request(app)
+      .get('/api/weather')
+      .query({ lat, lon })
+      .end((err, res) => {
+        if (err) return done(err);
+
+        expect(res).to.have.status(200);
+        // expect(res).to.be.json;
+        // expect(res.body).to.be.an('object');
+
+        done();
+        
+      });
+  });
+
+
 // ********************************************************************************
+
