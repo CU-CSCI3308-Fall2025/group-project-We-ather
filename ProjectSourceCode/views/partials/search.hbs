@@ -16,13 +16,11 @@
     </button>
   </div>
 
-  <!-- Hidden fields for lat/lon -->
   <input type="hidden" id="latitude" name="lat" />
   <input type="hidden" id="longitude" name="lon" />
 </form>
 
 <div id="search-message" class="mt-2 text-muted" role="status" aria-live="polite"></div>
-<div id="weather-result" class="mt-3"></div>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
@@ -31,12 +29,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const msg = document.getElementById('search-message');
   const btnText = document.getElementById('search-btn-text');
   const spinner = document.getElementById('search-spinner');
-  const result = document.getElementById('weather-result');
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     msg.textContent = '';
-    result.innerHTML = '';
     const q = (input.value || '').trim();
     if (!q) {
       msg.textContent = 'Please enter a location.';
@@ -69,72 +65,19 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const weather = await weatherRes.json();
-      result.innerHTML = `<pre class="bg-light p-2 rounded small">${escapeHtml(JSON.stringify(weather, null, 2))}</pre>`;
-      msg.textContent = `Showing weather for ${display_name}`;
+      
+      if (typeof displayWeather === 'function') {
+        displayWeather(weather);
+        msg.textContent = `Showing weather for ${display_name}`;
+      } else {
+        msg.textContent = 'Weather display function not available.';
+      }
     } catch (err) {
       console.error(err);
       msg.textContent = 'Error searching location.';
     } finally {
       spinner.classList.add('d-none');
       btnText.textContent = 'Search';
-    }
-  });
-
-  function escapeHtml(s) {
-    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
-});
-</script>
-
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-  const form = document.getElementById('location-search-form');
-  const input = document.getElementById('location-input');
-  const msg = document.getElementById('search-message');
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const q = input.value && input.value.trim();
-    msg.textContent = '';
-
-    if (!q) {
-      msg.textContent = 'Please enter a location.';
-      return;
-    }
-
-    try {
-      // Geocode using Nominatim
-      const geocodeUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`;
-      const geoRes = await fetch(geocodeUrl, { headers: { 'User-Agent': 'We-ather-App/1.0' }});
-      const places = await geoRes.json();
-
-      if (!places || places.length === 0) {
-        msg.textContent = 'No matching location found.';
-        return;
-      }
-
-      const { lat, lon, display_name } = places[0];
-
-      // Optional: populate hidden fields
-      document.getElementById('latitude').value = lat;
-      document.getElementById('longitude').value = lon;
-
-      msg.textContent = `Showing weather for ${display_name}...`;
-
-      // Request your weather API (adjust path/headers/auth as needed)
-      const weatherRes = await fetch(`/api/weather?lat=${lat}&lon=${lon}`);
-      if (!weatherRes.ok) {
-        msg.textContent = 'Failed to get weather (server error).';
-        return;
-      }
-      const weather = await weatherRes.json();
-
-      // TODO: render weather into page; for now show JSON
-      console.log('weather', weather);
-      msg.textContent = `Weather received — open console to inspect.`;
-    } catch (err) {
-      console.error(err);
-      msg.textContent = 'Error searching location.';
     }
   });
 });
