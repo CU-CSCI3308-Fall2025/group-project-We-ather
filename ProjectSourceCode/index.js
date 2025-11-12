@@ -133,6 +133,14 @@ app.get('/home', (req, res) => {
   });
 });
 
+app.get('/profile', (req, res) => {
+  res.render('pages/profile', {
+    layout: 'main',
+    username: req.session.user.username,
+    posts: []
+  });
+});
+
 app.get('/logout', async (req, res) => {
     req.session.destroy()
     res.render('pages/logout', {layout: 'main', message: 'Logged out Successfully', error:false})
