@@ -20,7 +20,12 @@
   <input type="hidden" id="longitude" name="lon" />
 </form>
 
-<div id="search-message" class="mt-2 text-muted" role="status" aria-live="polite"></div>
+<div id="search-message-container" class="mt-2 d-flex align-items-center gap-2" role="status" aria-live="polite">
+  <span id="search-message" class="text-muted"></span>
+  <button id="save-city-btn" class="btn btn-sm btn-outline-success d-none" type="button" title="Save this city to your saved cities list">
+    <i class="bi bi-bookmark-plus"></i> Save
+  </button>
+</div>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
@@ -29,10 +34,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const msg = document.getElementById('search-message');
   const btnText = document.getElementById('search-btn-text');
   const spinner = document.getElementById('search-spinner');
+  const saveBtn = document.getElementById('save-city-btn');
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     msg.textContent = '';
+    saveBtn.classList.add('d-none');
     const q = (input.value || '').trim();
     if (!q) {
       msg.textContent = 'Please enter a location.';
@@ -69,6 +76,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (typeof displayWeather === 'function') {
         displayWeather(weather);
         msg.textContent = `Showing weather for ${display_name}`;
+
+        
+        // Show save button after successful search
+        saveBtn.classList.remove('d-none');
       } else {
         msg.textContent = 'Weather display function not available.';
       }

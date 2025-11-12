@@ -45,11 +45,17 @@ async function ensureSchema() {
       name TEXT UNIQUE NOT NULL
     );
   `);
-
-  const sampleLocations = ['Boulder', 'Boston', 'Boise', 'Baltimore', 'Bangkok'];
-  for (const loc of sampleLocations) {
-    await db.none('INSERT INTO locations(name) VALUES($1) ON CONFLICT DO NOTHING', [loc]);
-  }
+  await db.none(`
+    CREATE TABLE IF NOT EXISTS user_saved_locations (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      location_text TEXT NOT NULL
+    );
+  `);
+  // const sampleLocations = ['Boulder', 'Boston', 'Boise', 'Baltimore'];
+  // for (const loc of sampleLocations) {
+  //   await db.none('INSERT INTO locations(name) VALUES($1) ON CONFLICT DO NOTHING', [loc]);
+  // }
 }
 
 // Register `hbs` as our view engine using its bound `engine()` function.
@@ -192,6 +198,24 @@ app.get('/api/locations', auth, async (req, res) => {
   }
 });
 
+// Verify table creation (protected by auth)
+app.get('/api/verify-table', auth, async (req, res) => {
+  try {
+    const result = await db.any(`
+      SELECT column_name, data_type 
+      FROM information_schema.columns 
+      WHERE table_name = 'user_saved_locations'
+      ORDER BY ordinal_position;
+    `);
+    res.json({ 
+      table_exists: result.length > 0,
+      columns: result 
+    });
+  } catch (error) {
+    console.error('Error verifying table:', error.message);
+    res.status(500).json({ error: 'Failed to verify table' });
+  }
+});
 
 app.use(auth);
 
