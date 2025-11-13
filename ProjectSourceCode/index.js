@@ -50,16 +50,26 @@ async function ensureSchema() {
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       location_text TEXT NOT NULL
-    );
-  `);
-  await db.none(`
-    CREATE TABLE IF NOT EXISTS search_history (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-      search_query TEXT NOT NULL,
-      created_at TIMESTAMPTZ DEFAULT NOW()
-    );
-  `);
+    );`);
+    // docker exec projectsourcecode-db-1 psql -U postgres -d users_db -c "SELECT u.username, usl.location_text, usl.id FROM user_saved_locations usl JOIN users u ON usl.user_id = u.id ORDER BY u.username, usl.location_text;"
+  // Add unique constraint if it doesn't exist (for existing tables)
+  try {
+    await db.none(`
+      DO $$ 
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint 
+          WHERE conname = 'user_saved_locations_user_location_unique'
+        ) THEN
+          ALTER TABLE user_saved_locations 
+          ADD CONSTRAINT user_saved_locations_user_location_unique 
+          UNIQUE(user_id, location_text);
+        END IF;
+      END $$;
+    `);
+  } catch (error) {
+    console.error('Error adding unique constraint:', error.message);
+  }
   // const sampleLocations = ['Boulder', 'Boston', 'Boise', 'Baltimore'];
   // for (const loc of sampleLocations) {
   //   await db.none('INSERT INTO locations(name) VALUES($1) ON CONFLICT DO NOTHING', [loc]);
@@ -206,24 +216,39 @@ app.get('/api/locations', auth, async (req, res) => {
   }
 });
 
-// Save search query to database (protected by auth)
-app.post('/api/search-history', auth, async (req, res) => {
-  const { search_query } = req.body;
+// Get user's saved locations (protected by auth)
+app.get('/api/saved-locations', auth, async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const locations = await db.any(
+      'SELECT location_text FROM user_saved_locations WHERE user_id = $1 ORDER BY location_text',
+      [userId]
+    );
+    res.json(locations.map(loc => loc.location_text));
+  } catch (error) {
+    console.error('Error fetching saved locations:', error.message);
+    res.status(500).json({ error: 'Failed to fetch saved locations' });
+  }
+});
 
-  if (!search_query || search_query.trim() === '') {
-    return res.status(400).json({ error: 'Search query is required' });
+// Save location to user's saved locations (protected by auth)
+app.post('/api/saved-locations', auth, async (req, res) => {
+  const { location_text } = req.body;
+
+  if (!location_text || location_text.trim() === '') {
+    return res.status(400).json({ error: 'Location text is required' });
   }
 
   try {
-    const userId = req.session.user ? req.session.user.id : null;
+    const userId = req.session.user.id;
     await db.none(
-      'INSERT INTO search_history (user_id, search_query) VALUES ($1, $2)',
-      [userId, search_query.trim()]
+      'INSERT INTO user_saved_locations (user_id, location_text) VALUES ($1, $2) ON CONFLICT (user_id, location_text) DO NOTHING',
+      [userId, location_text.trim()]
     );
-    res.json({ status: 'success', message: 'Search query saved' });
+    res.json({ status: 'success', message: 'Location saved' });
   } catch (error) {
-    console.error('Error saving search query:', error.message);
-    res.status(500).json({ error: 'Failed to save search query' });
+    console.error('Error saving location:', error.message);
+    res.status(500).json({ error: 'Failed to save location' });
   }
 });
 
