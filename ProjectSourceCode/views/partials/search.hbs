@@ -1,0 +1,95 @@
+<form id="location-search-form" class="d-flex align-items-center" role="search" aria-label="Search location">
+  <div class="input-group w-100">
+    <input
+      id="location-input"
+      name="location"
+      type="search"
+      class="form-control"
+      placeholder="Search city, address, or place (e.g. Boulder, CO)"
+      aria-label="Search location"
+      required
+      autocomplete="off"
+    />
+    <button class="btn btn-primary" type="submit" id="location-search-btn">
+      <span id="search-btn-text">Search</span>
+      <span id="search-spinner" class="spinner-border spinner-border-sm ms-2 d-none" role="status" aria-hidden="true"></span>
+    </button>
+  </div>
+
+  <input type="hidden" id="latitude" name="lat" />
+  <input type="hidden" id="longitude" name="lon" />
+</form>
+
+<div id="search-message-container" class="mt-2 d-flex align-items-center gap-2" role="status" aria-live="polite">
+  <span id="search-message" class="text-muted"></span>
+  <button id="save-city-btn" class="btn btn-sm btn-outline-success d-none" type="button" title="Save this city to your saved cities list">
+    <i class="bi bi-bookmark-plus"></i> Save
+  </button>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const form = document.getElementById('location-search-form');
+  const input = document.getElementById('location-input');
+  const msg = document.getElementById('search-message');
+  const btnText = document.getElementById('search-btn-text');
+  const spinner = document.getElementById('search-spinner');
+  const saveBtn = document.getElementById('save-city-btn');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    msg.textContent = '';
+    saveBtn.classList.add('d-none');
+    const q = (input.value || '').trim();
+    if (!q) {
+      msg.textContent = 'Please enter a location.';
+      return;
+    }
+
+    spinner.classList.remove('d-none');
+    btnText.textContent = 'Searching';
+
+    try {
+      const geocodeUrl = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`;
+      const geoRes = await fetch(geocodeUrl, { headers: { 'Accept': 'application/json' } });
+      const places = await geoRes.json();
+
+      if (!places || places.length === 0) {
+        msg.textContent = 'No matching location found.';
+        return;
+      }
+
+      const { lat, lon, display_name } = places[0];
+      document.getElementById('latitude').value = lat;
+      document.getElementById('longitude').value = lon;
+
+      msg.textContent = `Loading weather for ${display_name}...`;
+
+      const weatherRes = await fetch(`/api/weather?lat=${lat}&lon=${lon}`);
+      if (!weatherRes.ok) {
+        msg.textContent = 'Failed to get weather (server error).';
+        return;
+      }
+
+      const weather = await weatherRes.json();
+      
+      if (typeof displayWeather === 'function') {
+        displayWeather(weather);
+        msg.textContent = `Showing weather for ${display_name}`;
+
+        
+        // Show save button after successful search
+        saveBtn.classList.remove('d-none');
+      } else {
+        msg.textContent = 'Weather display function not available.';
+      }
+    } catch (err) {
+      console.error(err);
+      msg.textContent = 'Error searching location.';
+    } finally {
+      spinner.classList.add('d-none');
+      btnText.textContent = 'Search';
+    }
+  });
+});
+</script>
