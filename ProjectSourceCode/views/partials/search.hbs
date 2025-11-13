@@ -20,6 +20,13 @@
   <input type="hidden" id="longitude" name="lon" />
 </form>
 
+<div class="mt-2">
+  <label for="saved-locations-dropdown" class="form-label small text-muted">Saved Locations:</label>
+  <select id="saved-locations-dropdown" class="form-select form-select-sm">
+    <option value="">Select a saved location...</option>
+  </select>
+</div>
+
 <div id="search-message-container" class="mt-2 d-flex align-items-center gap-2" role="status" aria-live="polite">
   <span id="search-message" class="text-muted"></span>
   <button id="save-city-btn" class="btn btn-sm btn-outline-success d-none" type="button" title="Save this city to your saved cities list">
@@ -35,9 +42,50 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnText = document.getElementById('search-btn-text');
   const spinner = document.getElementById('search-spinner');
   const saveBtn = document.getElementById('save-city-btn');
+  const savedLocationsDropdown = document.getElementById('saved-locations-dropdown');
   
   // Store the current search query
   let currentSearchQuery = '';
+
+  // Load saved locations into dropdown
+  async function loadSavedLocations() {
+    try {
+      const response = await fetch('/api/saved-locations');
+      if (response.ok) {
+        const locations = await response.json();
+        // Clear existing options except the first one
+        savedLocationsDropdown.innerHTML = '<option value="">Select a saved location...</option>';
+        
+        if (locations.length === 0) {
+          savedLocationsDropdown.innerHTML += '<option value="" disabled>No saved locations</option>';
+        } else {
+          locations.forEach(location => {
+            const option = document.createElement('option');
+            option.value = location;
+            option.textContent = location;
+            savedLocationsDropdown.appendChild(option);
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Error loading saved locations:', err);
+    }
+  }
+
+  // Load saved locations on page load
+  loadSavedLocations();
+
+  // Handle dropdown selection - autofill search bar
+  savedLocationsDropdown.addEventListener('change', (e) => {
+    const selectedLocation = e.target.value;
+    if (selectedLocation) {
+      input.value = selectedLocation;
+      // Reset dropdown to default option
+      savedLocationsDropdown.value = '';
+      // Trigger search automatically
+      form.dispatchEvent(new Event('submit'));
+    }
+  });
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -101,17 +149,17 @@ document.addEventListener('DOMContentLoaded', () => {
   // Add click handler to save button
   saveBtn.addEventListener('click', async () => {
     if (!currentSearchQuery) {
-      msg.textContent = 'No search query to save.';
+      msg.textContent = 'No location to save.';
       return;
     }
 
     try {
-      const response = await fetch('/api/search-history', {
+      const response = await fetch('/api/saved-locations', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ search_query: currentSearchQuery }),
+        body: JSON.stringify({ location_text: currentSearchQuery }),
       });
 
       const data = await response.json();
@@ -119,12 +167,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (response.ok) {
         msg.textContent = `Saved: ${currentSearchQuery}`;
         saveBtn.classList.add('d-none');
+        // Reload saved locations dropdown
+        loadSavedLocations();
       } else {
-        msg.textContent = data.error || 'Failed to save search query.';
+        msg.textContent = data.error || 'Failed to save location.';
       }
     } catch (err) {
-      console.error('Error saving search query:', err);
-      msg.textContent = 'Error saving search query.';
+      console.error('Error saving location:', err);
+      msg.textContent = 'Error saving location.';
     }
   });
 });
