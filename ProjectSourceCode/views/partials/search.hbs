@@ -35,6 +35,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnText = document.getElementById('search-btn-text');
   const spinner = document.getElementById('search-spinner');
   const saveBtn = document.getElementById('save-city-btn');
+  
+  // Store the current search query
+  let currentSearchQuery = '';
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -45,6 +48,9 @@ document.addEventListener('DOMContentLoaded', () => {
       msg.textContent = 'Please enter a location.';
       return;
     }
+
+    // Store the search query for saving later
+    currentSearchQuery = q;
 
     spinner.classList.remove('d-none');
     btnText.textContent = 'Searching';
@@ -89,6 +95,36 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       spinner.classList.add('d-none');
       btnText.textContent = 'Search';
+    }
+  });
+
+  // Add click handler to save button
+  saveBtn.addEventListener('click', async () => {
+    if (!currentSearchQuery) {
+      msg.textContent = 'No search query to save.';
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/search-history', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ search_query: currentSearchQuery }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        msg.textContent = `Saved: ${currentSearchQuery}`;
+        saveBtn.classList.add('d-none');
+      } else {
+        msg.textContent = data.error || 'Failed to save search query.';
+      }
+    } catch (err) {
+      console.error('Error saving search query:', err);
+      msg.textContent = 'Error saving search query.';
     }
   });
 });

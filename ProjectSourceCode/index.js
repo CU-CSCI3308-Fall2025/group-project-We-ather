@@ -52,6 +52,14 @@ async function ensureSchema() {
       location_text TEXT NOT NULL
     );
   `);
+  await db.none(`
+    CREATE TABLE IF NOT EXISTS search_history (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      search_query TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
   // const sampleLocations = ['Boulder', 'Boston', 'Boise', 'Baltimore'];
   // for (const loc of sampleLocations) {
   //   await db.none('INSERT INTO locations(name) VALUES($1) ON CONFLICT DO NOTHING', [loc]);
@@ -195,6 +203,27 @@ app.get('/api/locations', auth, async (req, res) => {
   } catch (error) {
     console.error('Error fetching locations:', error.message);
     res.status(500).json({ error: 'Failed to fetch locations' });
+  }
+});
+
+// Save search query to database (protected by auth)
+app.post('/api/search-history', auth, async (req, res) => {
+  const { search_query } = req.body;
+
+  if (!search_query || search_query.trim() === '') {
+    return res.status(400).json({ error: 'Search query is required' });
+  }
+
+  try {
+    const userId = req.session.user ? req.session.user.id : null;
+    await db.none(
+      'INSERT INTO search_history (user_id, search_query) VALUES ($1, $2)',
+      [userId, search_query.trim()]
+    );
+    res.json({ status: 'success', message: 'Search query saved' });
+  } catch (error) {
+    console.error('Error saving search query:', error.message);
+    res.status(500).json({ error: 'Failed to save search query' });
   }
 });
 
