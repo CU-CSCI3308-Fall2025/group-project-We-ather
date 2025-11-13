@@ -1,0 +1,2 @@
+Release 1: 11/12/25
+https://github.com/CU-CSCI3308-Fall2025/group-project-We-ather/releases/tag/r1
