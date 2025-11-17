@@ -130,6 +130,24 @@ async function ensureSchema() {
       created_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
+  // Add unique constraint if it doesn't exist (for existing tables)
+  try {
+    await db.none(`
+      DO $$ 
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint 
+          WHERE conname = 'user_saved_locations_user_location_unique'
+        ) THEN
+          ALTER TABLE user_saved_locations 
+          ADD CONSTRAINT user_saved_locations_user_location_unique 
+          UNIQUE(user_id, location_text);
+        END IF;
+      END $$;
+    `);
+  } catch (error) {
+    console.error('Error adding unique constraint:', error.message);
+  }
   // const sampleLocations = ['Boulder', 'Boston', 'Boise', 'Baltimore'];
   // for (const loc of sampleLocations) {
   //   await db.none('INSERT INTO locations(name) VALUES($1) ON CONFLICT DO NOTHING', [loc]);
@@ -491,6 +509,40 @@ app.delete('/api/posts/:id', auth, async (req, res) => {
   } catch (error) {
     console.error('Error deleting post:', error);
     res.status(500).json({ error: 'Failed to delete post' });
+  }
+});
+
+// Get user's saved locations (protected by auth)
+app.get('/api/saved-locations', auth, async (req, res) => {
+  try {
+    const userId = req.session.user.id;
+    const locations = await db.any(
+      'SELECT location_text FROM user_saved_locations WHERE user_id = $1 ORDER BY location_text',
+      [userId]
+    );
+    res.json(locations.map(loc => loc.location_text));
+  } catch (error) {
+    console.error('Error fetching saved locations:', error.message);
+    res.status(500).json({ error: 'Failed to fetch saved locations' });
+  }
+});
+
+// Save location to user's saved locations (protected by auth)
+app.post('/api/saved-locations', auth, async (req, res) => {
+  const { location_text } = req.body;
+  if (!location_text || location_text.trim() === '') {
+    return res.status(400).json({ error: 'Location text is required' });
+  }
+  try {
+    const userId = req.session.user.id;
+    await db.none(
+      'INSERT INTO user_saved_locations (user_id, location_text) VALUES ($1, $2) ON CONFLICT (user_id, location_text) DO NOTHING',
+      [userId, location_text.trim()]
+    );
+    res.json({ status: 'success', message: 'Location saved' });
+  } catch (error) {
+    console.error('Error saving location:', error.message);
+    res.status(500).json({ error: 'Failed to save location' });
   }
 });
 
