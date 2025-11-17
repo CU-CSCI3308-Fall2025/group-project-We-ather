@@ -5,6 +5,8 @@ const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const pgp = require('pg-promise')();
 const fs = require('fs');
+const multer = require('multer');
+const crypto = require('crypto');
 
 const handlebars = require('express-handlebars');
 const Handlebars = require('handlebars');
@@ -16,6 +18,16 @@ const hbs = handlebars.create({
   extname: 'hbs',
   layoutsDir: __dirname + '/views/layouts',
   partialsDir: __dirname + '/views/partials',
+  helpers: {
+    formatDate: function(date) {
+      if (!date) return '';
+      const d = new Date(date);
+      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+    },
+    json: function(context) {
+      return JSON.stringify(context);
+    }
+  }
 });
 
 // Database configuration (from environment; docker compose provides these)
@@ -28,6 +40,60 @@ const dbConfig = {
 };
 
 const db = pgp(dbConfig);
+
+// Configure multer for file uploads
+const uploadsDir = path.join(__dirname, 'uploads');
+
+// Create uploads directory if it doesn't exist
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Configure multer storage
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    // Generate unique filename: timestamp-randomstring-originalname
+    const uniqueSuffix = Date.now() + '-' + crypto.randomBytes(6).toString('hex');
+    const ext = path.extname(file.originalname);
+    const basename = path.basename(file.originalname, ext);
+    cb(null, `${basename}-${uniqueSuffix}${ext}`);
+  }
+});
+
+// File filter to only accept images
+const fileFilter = (req, file, cb) => {
+  // Accept common image file types
+  const allowedMimeTypes = [
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+    'image/bmp',
+    'image/tiff',
+    'image/svg+xml',
+    'image/x-icon'
+  ];
+  
+  // Also accept any mimetype that starts with 'image/' as a fallback
+  if (file.mimetype.startsWith('image/') || allowedMimeTypes.includes(file.mimetype.toLowerCase())) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed! Supported formats: JPEG, JPG, PNG, GIF, WebP, BMP, TIFF, SVG, ICO'), false);
+  }
+};
+
+// Initialize multer with the storage configuration
+const upload = multer({ 
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  },
+  fileFilter: fileFilter
+});
 
 // Ensure users table exists
 async function ensureSchema() {
@@ -50,8 +116,20 @@ async function ensureSchema() {
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
       location_text TEXT NOT NULL
-    );`);
-    // docker exec projectsourcecode-db-1 psql -U postgres -d users_db -c "SELECT u.username, usl.location_text, usl.id FROM user_saved_locations usl JOIN users u ON usl.user_id = u.id ORDER BY u.username, usl.location_text;"
+    );
+  `);
+  await db.none(`
+    CREATE TABLE IF NOT EXISTS posts (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      content TEXT,
+      image_filename TEXT,
+      location TEXT,
+      latitude DECIMAL,
+      longitude DECIMAL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
   // Add unique constraint if it doesn't exist (for existing tables)
   try {
     await db.none(`
@@ -91,11 +169,29 @@ app.use(
     secret: process.env.SESSION_SECRET || 'dev-secret',
     saveUninitialized: false,
     resave: false,
+    name: 'we-ather.sid',
+    cookie: {
+      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production', // Only use secure cookies in production
+      sameSite: 'lax'
+    }
   })
 );
 
+// Simple auth guard
+const auth = (req, res, next) => {
+  if (!req.session.user) {
+    return res.redirect('/login');
+  }
+  next();
+};
+
 // Static views directory for HTML pages
 const viewsDir = path.join(__dirname, 'views');
+
+// Serve static files from uploads directory
+app.use('/uploads', express.static(uploadsDir));
 
 // Routes
 app.get('/', (req, res) => {
@@ -107,6 +203,10 @@ app.get('/welcome', (req, res) => {
 });
 
 app.get('/login', (req, res) => {
+  // If user is already logged in, redirect to home
+  if (req.session.user) {
+    return res.redirect('/home');
+  }
   res.render('pages/login', { layout: 'main' });
 });
 
@@ -117,8 +217,15 @@ app.post('/login', async (req, res) => {
         const match = await bcrypt.compare(req.body.password, user.password);
         if (match) {
             req.session.user = user;
-            req.session.save(); 
-            return res.redirect('/home');
+            // Save session and then redirect
+            req.session.save((err) => {
+                if (err) {
+                    console.error('Error saving session:', err);
+                    return res.status(500).render('pages/login', { layout: 'main', message: 'Error logging in. Please try again.', error: true });
+                }
+                return res.redirect('/home');
+            });
+            return;
         }
         return res.status(401).render('pages/login', { layout: 'main', message: 'Invalid username or password.', error: true });
     } 
@@ -129,6 +236,10 @@ app.post('/login', async (req, res) => {
 });
 
 app.get('/register', (req, res) => {
+  // If user is already logged in, redirect to home
+  if (req.session.user) {
+    return res.redirect('/home');
+  }
   res.render('pages/register', { layout: 'main' });
 });
 
@@ -149,34 +260,70 @@ app.post('/register', async (req, res) => {
     }
 });
 
-app.get('/home', (req, res) => {
-  res.render('pages/home', {
+app.get('/home', auth, async (req, res) => {
+  try {
+    const posts = await db.any(`
+      SELECT p.*, u.username 
+      FROM posts p 
+      JOIN users u ON p.user_id = u.id 
+      ORDER BY p.created_at DESC 
+      LIMIT 50
+    `);
+    res.render('pages/home', {
+      layout: 'main',
+      username: req.session.user.username,
+      posts: posts,
+    });
+  } catch (error) {
+    console.error('Error fetching posts:', error);
+    res.render('pages/home', {
+      layout: 'main',
+      username: req.session.user.username,
+      posts: [],
+    });
+  }
+});
+
+app.get('/posts', auth, (req, res) => {
+  res.render('pages/posts', {
     layout: 'main',
-    username: req.session.user.username,
-    posts: [],
+    username: req.session.user.username
   });
 });
 
-app.get('/profile', (req, res) => {
-  res.render('pages/profile', {
-    layout: 'main',
-    username: req.session.user.username,
-    posts: []
-  });
+app.get('/profile', auth, async (req, res) => {
+  try {
+    const posts = await db.any(`
+      SELECT p.*, u.username 
+      FROM posts p 
+      JOIN users u ON p.user_id = u.id 
+      WHERE p.user_id = $1
+      ORDER BY p.created_at DESC
+    `, [req.session.user.id]);
+    // Add can_delete flag since these are the user's own posts
+    const postsWithDelete = posts.map(post => ({
+      ...post,
+      can_delete: true
+    }));
+    res.render('pages/profile', {
+      layout: 'main',
+      username: req.session.user.username,
+      posts: postsWithDelete
+    });
+  } catch (error) {
+    console.error('Error fetching user posts:', error);
+    res.render('pages/profile', {
+      layout: 'main',
+      username: req.session.user.username,
+      posts: []
+    });
+  }
 });
 
 app.get('/logout', async (req, res) => {
     req.session.destroy()
     res.render('pages/logout', {layout: 'main', message: 'Logged out Successfully', error:false})
 })
-
-// Simple auth guard
-const auth = (req, res, next) => {
-  if (!req.session.user) {
-    return res.redirect('/login');
-  }
-  next();
-};
 
 // Weather API route (protected by auth)
 app.get('/api/weather', auth, async (req, res) => {
@@ -216,6 +363,155 @@ app.get('/api/locations', auth, async (req, res) => {
   }
 });
 
+// Create a new post with image upload (protected by auth)
+app.post('/api/posts', auth, (req, res, next) => {
+  upload.single('image')(req, res, (err) => {
+    // Handle multer errors
+    if (err) {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return res.status(400).json({ error: 'File size too large. Maximum size is 10MB.' });
+        }
+        return res.status(400).json({ error: err.message });
+      }
+      if (err.message === 'Only image files are allowed!') {
+        return res.status(400).json({ error: 'Only image files are allowed!' });
+      }
+      return res.status(400).json({ error: err.message });
+    }
+    next();
+  });
+}, async (req, res) => {
+  try {
+    const { content, location, latitude, longitude } = req.body;
+    const userId = req.session.user.id;
+    const imageFilename = req.file ? req.file.filename : null;
+
+    if (!content && !imageFilename) {
+      // If file was uploaded but no content, delete it
+      if (req.file) {
+        fs.unlinkSync(req.file.path);
+      }
+      return res.status(400).json({ error: 'Post must have either content or an image' });
+    }
+
+    const result = await db.one(`
+      INSERT INTO posts (user_id, content, image_filename, location, latitude, longitude)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, created_at
+    `, [
+      userId,
+      content || null,
+      imageFilename,
+      location || null,
+      latitude ? parseFloat(latitude) : null,
+      longitude ? parseFloat(longitude) : null
+    ]);
+
+    // Fetch the complete post with username
+    const post = await db.one(`
+      SELECT p.*, u.username 
+      FROM posts p 
+      JOIN users u ON p.user_id = u.id 
+      WHERE p.id = $1
+    `, [result.id]);
+
+    res.status(201).json({ success: true, post: post });
+  } catch (error) {
+    console.error('Error creating post:', error);
+    // Clean up uploaded file if post creation failed
+    if (req.file) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (unlinkError) {
+        console.error('Error deleting file:', unlinkError);
+      }
+    }
+    res.status(500).json({ error: 'Failed to create post' });
+  }
+});
+
+// Get all posts (protected by auth)
+app.get('/api/posts', auth, async (req, res) => {
+  try {
+    const { location, user_id } = req.query;
+    let query = `
+      SELECT p.*, u.username 
+      FROM posts p 
+      JOIN users u ON p.user_id = u.id 
+      WHERE 1=1
+    `;
+    const params = [];
+    let paramCount = 1;
+
+    if (location) {
+      query += ` AND p.location ILIKE $${paramCount}`;
+      params.push(`%${location}%`);
+      paramCount++;
+    }
+
+    if (user_id) {
+      query += ` AND p.user_id = $${paramCount}`;
+      params.push(parseInt(user_id));
+      paramCount++;
+    }
+
+    query += ` ORDER BY p.created_at DESC LIMIT 50`;
+
+    const posts = await db.any(query, params);
+    // Add current user ID to each post so frontend knows which posts can be deleted
+    const postsWithUser = posts.map(post => ({
+      ...post,
+      current_user_id: req.session.user.id,
+      can_delete: post.user_id === req.session.user.id
+    }));
+    res.json(postsWithUser);
+  } catch (error) {
+    console.error('Error fetching posts:', error);
+    res.status(500).json({ error: 'Failed to fetch posts' });
+  }
+});
+
+// Delete a post (protected by auth, only post owner can delete)
+app.delete('/api/posts/:id', auth, async (req, res) => {
+  try {
+    const postId = parseInt(req.params.id);
+    const userId = req.session.user.id;
+
+    // First, check if the post exists and belongs to the user
+    const post = await db.oneOrNone('SELECT * FROM posts WHERE id = $1', [postId]);
+    
+    if (!post) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    if (post.user_id !== userId) {
+      return res.status(403).json({ error: 'You can only delete your own posts' });
+    }
+
+    // Delete the associated image file if it exists
+    if (post.image_filename) {
+      const imagePath = path.join(uploadsDir, post.image_filename);
+      try {
+        if (fs.existsSync(imagePath)) {
+          fs.unlinkSync(imagePath);
+        }
+      } catch (fileError) {
+        console.error('Error deleting image file:', fileError);
+        // Continue with post deletion even if file deletion fails
+      }
+    }
+
+    // Delete the post from the database
+    await db.none('DELETE FROM posts WHERE id = $1', [postId]);
+
+    res.json({ success: true, message: 'Post deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting post:', error);
+    res.status(500).json({ error: 'Failed to delete post' });
+  }
+});
+
 // Get user's saved locations (protected by auth)
 app.get('/api/saved-locations', auth, async (req, res) => {
   try {
@@ -234,11 +530,9 @@ app.get('/api/saved-locations', auth, async (req, res) => {
 // Save location to user's saved locations (protected by auth)
 app.post('/api/saved-locations', auth, async (req, res) => {
   const { location_text } = req.body;
-
   if (!location_text || location_text.trim() === '') {
     return res.status(400).json({ error: 'Location text is required' });
   }
-
   try {
     const userId = req.session.user.id;
     await db.none(

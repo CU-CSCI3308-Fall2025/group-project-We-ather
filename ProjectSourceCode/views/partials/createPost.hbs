@@ -1,0 +1,354 @@
+<div class="container mb-4">
+  <div class="card shadow-sm">
+    <div class="card-header">
+      <h5 class="mb-0">Share Your Weather</h5>
+    </div>
+    <div class="card-body">
+      <form id="createPostForm" enctype="multipart/form-data">
+        <div class="mb-3">
+          <label for="postContent" class="form-label">Description (optional)</label>
+          <textarea class="form-control" id="postContent" name="content" rows="3" placeholder="Describe the weather conditions..."></textarea>
+        </div>
+        <div class="mb-3 position-relative">
+          <label for="postLocation" class="form-label">Location (optional)</label>
+          <input 
+            type="text" 
+            class="form-control" 
+            id="postLocation" 
+            name="location" 
+            placeholder="City, State"
+            autocomplete="off"
+            aria-autocomplete="list"
+            aria-expanded="false"
+            aria-controls="post-location-autocomplete"
+          />
+          <!-- Autocomplete dropdown for post location -->
+          <div id="post-location-autocomplete" class="autocomplete-dropdown" role="listbox" aria-label="Location suggestions"></div>
+        </div>
+        <div class="mb-3">
+          <label for="postImage" class="form-label">Upload Photo</label>
+          <input type="file" class="form-control" id="postImage" name="image" accept="image/jpeg,image/jpg,image/png,image/gif,image/webp,image/bmp,image/tiff,image/svg+xml,image/x-icon,image/*">
+          <small class="form-text text-muted">Upload a photo of the current weather conditions (max 10MB). Supported formats: JPEG, JPG, PNG, GIF, WebP, BMP, TIFF, SVG, ICO</small>
+        </div>
+        <div id="postError" class="alert alert-danger d-none" role="alert"></div>
+        <div id="postSuccess" class="alert alert-success d-none" role="alert">Post created successfully!</div>
+        <button type="submit" class="btn btn-primary" id="submitPostBtn">
+          <span class="spinner-border spinner-border-sm d-none" id="postSpinner" role="status" aria-hidden="true"></span>
+          Share Post
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<style>
+  .autocomplete-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid #ced4da;
+    border-top: none;
+    border-radius: 0 0 0.375rem 0.375rem;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 1000;
+    display: none;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+
+  .autocomplete-dropdown.show {
+    display: block;
+  }
+
+  .autocomplete-item {
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background-color 0.2s;
+  }
+
+  .autocomplete-item:hover,
+  .autocomplete-item.active {
+    background-color: #f8f9fa;
+  }
+
+  .autocomplete-item:last-child {
+    border-bottom: none;
+  }
+
+  .autocomplete-item-name {
+    font-weight: 500;
+    color: #212529;
+  }
+
+  .autocomplete-item-details {
+    font-size: 0.875rem;
+    color: #6c757d;
+    margin-top: 0.25rem;
+  }
+</style>
+
+<script>
+  // Autocomplete functionality for post location
+  (function() {
+    const postLocationInput = document.getElementById('postLocation');
+    const postAutocompleteResults = document.getElementById('post-location-autocomplete');
+    const createPostForm = document.getElementById('createPostForm');
+    
+    let postAutocompleteTimeout = null;
+    let postSelectedIndex = -1;
+    let postCurrentSuggestions = [];
+
+    // Autocomplete functionality
+    async function fetchPostAutocompleteSuggestions(query) {
+      if (!query || query.length < 2) {
+        hidePostAutocomplete();
+        return;
+      }
+
+      try {
+        // Use OpenStreetMap Nominatim API for autocomplete
+        // Only search within US (countrycodes=us) since weather.gov API only supports US locations
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5&addressdetails=1&countrycodes=us`;
+        const response = await fetch(url, {
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'We-ather App'
+          }
+        });
+        
+        if (!response.ok) {
+          return;
+        }
+
+        const places = await response.json();
+        // Filter to only include places with US in the address
+        const usPlaces = places.filter(place => {
+          const address = place.address || {};
+          return address.country_code === 'us' || 
+                 place.display_name.toLowerCase().includes(', united states') ||
+                 place.display_name.toLowerCase().includes(', usa') ||
+                 place.display_name.toLowerCase().includes(', us');
+        });
+        
+        // Deduplicate by City, State format
+        const seen = new Set();
+        const uniquePlaces = usPlaces.filter(place => {
+          const locationParts = place.display_name.split(',');
+          const cityState = locationParts.slice(0, 2).join(',').trim().toLowerCase() || locationParts[0].trim().toLowerCase();
+          if (seen.has(cityState)) {
+            return false;
+          }
+          seen.add(cityState);
+          return true;
+        });
+        
+        postCurrentSuggestions = uniquePlaces;
+        displayPostAutocomplete(uniquePlaces);
+      } catch (error) {
+        console.error('Error fetching autocomplete:', error);
+        hidePostAutocomplete();
+      }
+    }
+
+    function displayPostAutocomplete(suggestions) {
+      if (!suggestions || suggestions.length === 0) {
+        hidePostAutocomplete();
+        return;
+      }
+
+      postAutocompleteResults.innerHTML = '';
+      suggestions.forEach((place, index) => {
+        const item = document.createElement('div');
+        item.className = 'autocomplete-item';
+        item.setAttribute('role', 'option');
+        item.setAttribute('data-index', index);
+        
+        // Format location as "City, State" to match search format
+        const locationParts = place.display_name.split(',');
+        const cityState = locationParts.slice(0, 2).join(',').trim() || locationParts[0].trim();
+        const details = locationParts.slice(2, 4).join(',').trim();
+        
+        item.innerHTML = `
+          <div class="autocomplete-item-name">${cityState}</div>
+          ${details ? `<div class="autocomplete-item-details">${details}</div>` : ''}
+        `;
+        
+        item.addEventListener('click', () => {
+          selectPostSuggestion(place);
+        });
+        
+        item.addEventListener('mouseenter', () => {
+          postSelectedIndex = index;
+          updatePostActiveItem();
+        });
+        
+        postAutocompleteResults.appendChild(item);
+      });
+
+      postAutocompleteResults.classList.add('show');
+      postLocationInput.setAttribute('aria-expanded', 'true');
+      postSelectedIndex = -1;
+    }
+
+    function hidePostAutocomplete() {
+      postAutocompleteResults.classList.remove('show');
+      postAutocompleteResults.innerHTML = '';
+      postLocationInput.setAttribute('aria-expanded', 'false');
+      postSelectedIndex = -1;
+      postCurrentSuggestions = [];
+    }
+
+    function selectPostSuggestion(place) {
+      // Format location as "City, State" to match search format
+      const locationParts = place.display_name.split(',');
+      const cityState = locationParts.slice(0, 2).join(',').trim() || locationParts[0].trim();
+      postLocationInput.value = cityState;
+      hidePostAutocomplete();
+    }
+
+    function updatePostActiveItem() {
+      const items = postAutocompleteResults.querySelectorAll('.autocomplete-item');
+      items.forEach((item, index) => {
+        if (index === postSelectedIndex) {
+          item.classList.add('active');
+        } else {
+          item.classList.remove('active');
+        }
+      });
+    }
+
+    // Input event listener for autocomplete
+    postLocationInput.addEventListener('input', (e) => {
+      const query = e.target.value.trim();
+      
+      // Clear previous timeout
+      if (postAutocompleteTimeout) {
+        clearTimeout(postAutocompleteTimeout);
+      }
+
+      // Debounce autocomplete requests
+      postAutocompleteTimeout = setTimeout(() => {
+        fetchPostAutocompleteSuggestions(query);
+      }, 300);
+    });
+
+    // Handle keyboard navigation
+    postLocationInput.addEventListener('keydown', (e) => {
+      if (!postAutocompleteResults.classList.contains('show') || postCurrentSuggestions.length === 0) {
+        return;
+      }
+
+      switch(e.key) {
+        case 'ArrowDown':
+          e.preventDefault();
+          postSelectedIndex = Math.min(postSelectedIndex + 1, postCurrentSuggestions.length - 1);
+          updatePostActiveItem();
+          break;
+        case 'ArrowUp':
+          e.preventDefault();
+          postSelectedIndex = Math.max(postSelectedIndex - 1, -1);
+          updatePostActiveItem();
+          break;
+        case 'Enter':
+          if (postSelectedIndex >= 0 && postCurrentSuggestions[postSelectedIndex]) {
+            e.preventDefault();
+            selectPostSuggestion(postCurrentSuggestions[postSelectedIndex]);
+          }
+          break;
+        case 'Escape':
+          hidePostAutocomplete();
+          break;
+      }
+    });
+
+    // Hide autocomplete when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!createPostForm.contains(e.target)) {
+        hidePostAutocomplete();
+      }
+    });
+
+    // Hide autocomplete when input loses focus (with a small delay to allow clicks)
+    postLocationInput.addEventListener('blur', () => {
+      setTimeout(() => {
+        hidePostAutocomplete();
+      }, 200);
+    });
+
+    // Hide autocomplete when form is submitted
+    createPostForm.addEventListener('submit', () => {
+      hidePostAutocomplete();
+    });
+  })();
+
+  document.getElementById('createPostForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    
+    const formData = new FormData(this);
+    const submitBtn = document.getElementById('submitPostBtn');
+    const spinner = document.getElementById('postSpinner');
+    const errorDiv = document.getElementById('postError');
+    const successDiv = document.getElementById('postSuccess');
+    
+    // Hide previous messages
+    errorDiv.classList.add('d-none');
+    successDiv.classList.add('d-none');
+    
+    // Show loading state
+    submitBtn.disabled = true;
+    spinner.classList.remove('d-none');
+    
+    try {
+      // Get user's current location if available
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition((position) => {
+          formData.append('latitude', position.coords.latitude);
+          formData.append('longitude', position.coords.longitude);
+          submitPost(formData);
+        }, () => {
+          // If geolocation fails, submit without coordinates
+          submitPost(formData);
+        });
+      } else {
+        submitPost(formData);
+      }
+    } catch (error) {
+      submitPost(formData);
+    }
+    
+    function submitPost(data) {
+      fetch('/api/posts', {
+        method: 'POST',
+        body: data
+      })
+      .then(response => response.json())
+      .then(data => {
+        spinner.classList.add('d-none');
+        submitBtn.disabled = false;
+        
+        if (data.success) {
+          successDiv.classList.remove('d-none');
+          // Reset form
+          document.getElementById('createPostForm').reset();
+          // Redirect to home page after a short delay to show the new post
+          setTimeout(() => {
+            window.location.href = '/home';
+          }, 1000);
+        } else {
+          errorDiv.textContent = data.error || 'Failed to create post';
+          errorDiv.classList.remove('d-none');
+        }
+      })
+      .catch(error => {
+        spinner.classList.add('d-none');
+        submitBtn.disabled = false;
+        errorDiv.textContent = 'Error: ' + error.message;
+        errorDiv.classList.remove('d-none');
+      });
+    }
+  });
+</script>
+

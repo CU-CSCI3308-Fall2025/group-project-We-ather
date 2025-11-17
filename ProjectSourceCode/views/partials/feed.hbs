@@ -1,14 +1,160 @@
 <div class="container pb-10 m-10">
-  <h3>Feed</h3>
-  {{#if posts.length}}
-    <div class="row">
-        {{#each posts}}
-        <div class="col-md-4 mt-4">
-            Result
-        </div>
-        {{/each}}
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0">Weather Feed</h3>
+    <div id="feed-filter-info" class="d-none">
+      <span id="filter-location-text" class="text-muted me-2"></span>
+      <button id="clear-filter-btn" class="btn btn-sm btn-outline-secondary">Show All Posts</button>
     </div>
-  {{else}}
-  <p>No posts found at this location.</p>
-  {{/if}}
+  </div>
+  <div id="feed-loading" class="text-center py-4 d-none">
+    <div class="spinner-border text-primary" role="status">
+      <span class="visually-hidden">Loading...</span>
+    </div>
+  </div>
+  <div id="feed-container">
+    <p class="text-muted">Loading posts...</p>
+  </div>
 </div>
+
+<script>
+  // Store initial posts for "Show All" functionality
+  let allPosts = [];
+  let currentFilter = null;
+
+  // Load posts on page load
+  document.addEventListener('DOMContentLoaded', () => {
+    loadPosts();
+  });
+
+  // Function to format date
+  function formatDate(dateString) {
+    if (!dateString) return '';
+    const d = new Date(dateString);
+    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+  }
+
+  // Function to render posts
+  function renderPosts(posts) {
+    const container = document.getElementById('feed-container');
+    if (!posts || posts.length === 0) {
+      container.innerHTML = '<p class="text-muted">No posts found for this location. Be the first to share your weather here!</p>';
+      return;
+    }
+
+    const postsHtml = posts.map(post => `
+      <div class="col-md-6 col-lg-4 mt-4">
+        <div class="card shadow-sm h-100">
+          ${post.image_filename ? `<img src="/uploads/${post.image_filename}" class="card-img-top" alt="Weather photo" style="height: 200px; object-fit: cover;">` : ''}
+          <div class="card-body d-flex flex-column">
+            ${post.content ? `<p class="card-text">${post.content}</p>` : ''}
+            <div class="mt-auto">
+              <div class="d-flex justify-content-between align-items-center">
+                <small class="text-muted">
+                  <strong>${post.username}</strong>
+                  ${post.location ? ` • ${post.location}` : ''}
+                  <br>
+                  <span class="text-muted">${formatDate(post.created_at)}</span>
+                </small>
+                ${post.can_delete ? `
+                  <button class="btn btn-sm btn-outline-danger delete-post-btn" data-post-id="${post.id}" title="Delete post">
+                    <i class="bi bi-trash"></i>
+                  </button>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `).join('');
+
+    container.innerHTML = `<div class="row">${postsHtml}</div>`;
+  }
+
+  // Function to load posts with optional location filter
+  async function loadPosts(location = null) {
+    const loadingEl = document.getElementById('feed-loading');
+    const filterInfo = document.getElementById('feed-filter-info');
+    const filterText = document.getElementById('filter-location-text');
+    const clearBtn = document.getElementById('clear-filter-btn');
+
+    loadingEl.classList.remove('d-none');
+
+    try {
+      const url = location ? `/api/posts?location=${encodeURIComponent(location)}` : '/api/posts';
+      const response = await fetch(url);
+      const posts = await response.json();
+
+      if (!location) {
+        allPosts = posts;
+        currentFilter = null;
+        filterInfo.classList.add('d-none');
+      } else {
+        currentFilter = location;
+        filterText.textContent = `Showing posts from: ${location}`;
+        filterInfo.classList.remove('d-none');
+      }
+
+      renderPosts(posts);
+    } catch (error) {
+      console.error('Error loading posts:', error);
+      document.getElementById('feed-container').innerHTML = '<p class="text-danger">Error loading posts. Please try again.</p>';
+    } finally {
+      loadingEl.classList.add('d-none');
+    }
+  }
+
+  // Clear filter button handler
+  const clearBtn = document.getElementById('clear-filter-btn');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      loadPosts();
+    });
+  }
+
+  // Expose loadPosts globally so search can call it
+  window.loadPostsByLocation = loadPosts;
+
+  // Handle delete post buttons
+  document.addEventListener('click', async (e) => {
+    if (e.target.closest('.delete-post-btn')) {
+      const btn = e.target.closest('.delete-post-btn');
+      const postId = btn.getAttribute('data-post-id');
+      
+      if (!postId) return;
+
+      // Confirm deletion
+      if (!confirm('Are you sure you want to delete this post? This action cannot be undone.')) {
+        return;
+      }
+
+      // Disable button during deletion
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+      try {
+        const response = await fetch(`/api/posts/${postId}`, {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+          // Reload posts after successful deletion
+          await loadPosts(currentFilter);
+        } else {
+          alert(data.error || 'Failed to delete post');
+          btn.disabled = false;
+          btn.innerHTML = '<i class="bi bi-trash"></i>';
+        }
+      } catch (error) {
+        console.error('Error deleting post:', error);
+        alert('Error deleting post. Please try again.');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-trash"></i>';
+      }
+    }
+  });
+</script>
