@@ -546,6 +546,28 @@ app.post('/api/saved-locations', auth, async (req, res) => {
   }
 });
 
+// Delete location from user's saved locations (protected by auth)
+app.delete('/api/saved-locations', auth, async (req, res) => {
+  const { location_text } = req.body;
+  if (!location_text || location_text.trim() === '') {
+    return res.status(400).json({ error: 'Location text is required' });
+  }
+  try {
+    const userId = req.session.user.id;
+    const result = await db.result(
+      'DELETE FROM user_saved_locations WHERE user_id = $1 AND location_text = $2',
+      [userId, location_text.trim()]
+    );
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Location not found' });
+    }
+    res.json({ status: 'success', message: 'Location deleted' });
+  } catch (error) {
+    console.error('Error deleting location:', error.message);
+    res.status(500).json({ error: 'Failed to delete location' });
+  }
+});
+
 // Verify table creation (protected by auth)
 app.get('/api/verify-table', auth, async (req, res) => {
   try {

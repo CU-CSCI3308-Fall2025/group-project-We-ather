@@ -4,39 +4,149 @@
         <br>
         <h5 class="mt-3">
             Saved locations:
-            <div id="saved-locations-display"></div>
         </h5>
+        <div class="col-md-6 mb-4">
+          <div id="saved-locations-container" class="saved-locations-list">
+            <div class="text-muted small p-2">Loading saved locations...</div>
+          </div>
+        </div>
         <h2>Your posts:</h2>
         {{> feed}}
     </div>
   </div>
 
+<style>
+  .saved-locations-list {
+    border: 1px solid #ced4da;
+    border-radius: 0.375rem;
+    background: white;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .saved-location-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #f0f0f0;
+    transition: background-color 0.2s;
+  }
+
+  .saved-location-item:last-child {
+    border-bottom: none;
+  }
+
+  .saved-location-item:hover {
+    background-color: #f8f9fa;
+  }
+
+  .saved-location-text {
+    flex: 1;
+    font-size: 0.875rem;
+    color: #212529;
+  }
+
+  .saved-location-delete {
+    background: none;
+    border: none;
+    color: #dc3545;
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    line-height: 1;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+  }
+
+  .saved-location-delete:hover {
+    opacity: 1;
+    color: #c82333;
+  }
+
+  .saved-location-delete:focus {
+    outline: 2px solid #dc3545;
+    outline-offset: 2px;
+    border-radius: 0.25rem;
+  }
+
+  .saved-locations-empty {
+    padding: 0.75rem;
+    text-align: center;
+    color: #6c757d;
+    font-size: 0.875rem;
+  }
+</style>
 
 <script>
+  const savedLocationsContainer = document.getElementById('saved-locations-container');
+
+  // Load saved locations into container
   async function loadSavedLocations() {
     try {
       const response = await fetch('/api/saved-locations');
       if (response.ok) {
         const locations = await response.json();
-        const displayContainer = document.getElementById('saved-locations-display');
+        
+        // Clear container
+        savedLocationsContainer.innerHTML = '';
         
         if (locations.length === 0) {
-          displayContainer.innerHTML = '<div class="text-muted small">None</div>';
+          savedLocationsContainer.innerHTML = '<div class="saved-locations-empty">No saved locations</div>';
         } else {
-          displayContainer.innerHTML = locations
-            .map(location => `<div class="small">${location}</div>`)
-            .join('');
+          locations.forEach(location => {
+            const item = document.createElement('div');
+            item.className = 'saved-location-item';
+            
+            const text = document.createElement('span');
+            text.className = 'saved-location-text';
+            text.textContent = location;
+            
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'saved-location-delete';
+            deleteBtn.innerHTML = '×';
+            deleteBtn.setAttribute('aria-label', `Delete ${location}`);
+            deleteBtn.type = 'button';
+            
+            // Handle delete button click
+            deleteBtn.addEventListener('click', async (e) => {
+              e.stopPropagation(); // Prevent triggering the item click
+              if (confirm(`Delete "${location}" from saved locations?`)) {
+                try {
+                  const deleteResponse = await fetch('/api/saved-locations', {
+                    method: 'DELETE',
+                    headers: {
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ location_text: location }),
+                  });
+                  
+                  if (deleteResponse.ok) {
+                    // Reload the list
+                    loadSavedLocations();
+                  } else {
+                    const data = await deleteResponse.json();
+                    alert(data.error || 'Failed to delete location');
+                  }
+                } catch (err) {
+                  console.error('Error deleting location:', err);
+                  alert('Error deleting location');
+                }
+              }
+            });
+            
+            item.appendChild(text);
+            item.appendChild(deleteBtn);
+            savedLocationsContainer.appendChild(item);
+          });
         }
-      } else {
-        document.getElementById('saved-locations-display').innerHTML = 
-          '<div class="text-muted small">None</div>';
       }
     } catch (err) {
       console.error('Error loading saved locations:', err);
-      document.getElementById('saved-locations-display').innerHTML = 
-        '<div class="text-muted small">None</div>';
+      savedLocationsContainer.innerHTML = '<div class="saved-locations-empty text-danger">Error loading saved locations</div>';
     }
   }
 
+  // Load saved locations on page load
   document.addEventListener('DOMContentLoaded', loadSavedLocations);
 </script>
