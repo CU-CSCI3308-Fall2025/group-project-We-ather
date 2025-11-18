@@ -27,9 +27,9 @@
 
 <div class="mt-2">
   <label for="saved-locations-dropdown" class="form-label small text-muted">Saved Locations:</label>
-  <select id="saved-locations-dropdown" class="form-select form-select-sm">
-    <option value="">Select a saved location...</option>
-  </select>
+  <div id="saved-locations-container" class="saved-locations-list">
+    <div class="text-muted small p-2">Loading saved locations...</div>
+  </div>
 </div>
 
 <div id="search-message-container" class="mt-2 d-flex align-items-center gap-2" role="status" aria-live="polite">
@@ -90,6 +90,68 @@
   .input-group {
     position: relative;
   }
+
+  .saved-locations-list {
+    border: 1px solid #ced4da;
+    border-radius: 0.375rem;
+    background: white;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .saved-location-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid #f0f0f0;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+
+  .saved-location-item:last-child {
+    border-bottom: none;
+  }
+
+  .saved-location-item:hover {
+    background-color: #f8f9fa;
+  }
+
+  .saved-location-text {
+    flex: 1;
+    font-size: 0.875rem;
+    color: #212529;
+  }
+
+  .saved-location-delete {
+    background: none;
+    border: none;
+    color: #dc3545;
+    font-size: 1.1rem;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    line-height: 1;
+    opacity: 0.7;
+    transition: opacity 0.2s;
+  }
+
+  .saved-location-delete:hover {
+    opacity: 1;
+    color: #c82333;
+  }
+
+  .saved-location-delete:focus {
+    outline: 2px solid #dc3545;
+    outline-offset: 2px;
+    border-radius: 0.25rem;
+  }
+
+  .saved-locations-empty {
+    padding: 0.75rem;
+    text-align: center;
+    color: #6c757d;
+    font-size: 0.875rem;
+  }
 </style>
 
 <script>
@@ -101,7 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const spinner = document.getElementById('search-spinner');
   const saveBtn = document.getElementById('save-city-btn');
   const autocompleteResults = document.getElementById('autocomplete-results');
-  const savedLocationsDropdown = document.getElementById('saved-locations-dropdown');
+  const savedLocationsContainer = document.getElementById('saved-locations-container');
   
   let autocompleteTimeout = null;
   let selectedIndex = -1;
@@ -109,45 +171,84 @@ document.addEventListener('DOMContentLoaded', () => {
   // Store the current search query
   let currentSearchQuery = '';
 
-  // Load saved locations into dropdown
+  // Load saved locations into container
   async function loadSavedLocations() {
     try {
       const response = await fetch('/api/saved-locations');
       if (response.ok) {
         const locations = await response.json();
-        // Clear existing options except the first one
-        savedLocationsDropdown.innerHTML = '<option value="">Select a saved location...</option>';
+        
+        // Clear container
+        savedLocationsContainer.innerHTML = '';
         
         if (locations.length === 0) {
-          savedLocationsDropdown.innerHTML += '<option value="" disabled>No saved locations</option>';
+          savedLocationsContainer.innerHTML = '<div class="saved-locations-empty">No saved locations</div>';
         } else {
           locations.forEach(location => {
-            const option = document.createElement('option');
-            option.value = location;
-            option.textContent = location;
-            savedLocationsDropdown.appendChild(option);
+            const item = document.createElement('div');
+            item.className = 'saved-location-item';
+            
+            const text = document.createElement('span');
+            text.className = 'saved-location-text';
+            text.textContent = location;
+            
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'saved-location-delete';
+            deleteBtn.innerHTML = '×';
+            deleteBtn.setAttribute('aria-label', `Delete ${location}`);
+            deleteBtn.type = 'button';
+            
+            // Handle click on entire item - autofill and search
+            item.addEventListener('click', (e) => {
+              // Don't trigger if clicking the delete button
+              if (e.target === deleteBtn || deleteBtn.contains(e.target)) {
+                return;
+              }
+              input.value = location;
+              form.dispatchEvent(new Event('submit'));
+            });
+            
+            // Handle delete button click
+            deleteBtn.addEventListener('click', async (e) => {
+              e.stopPropagation(); // Prevent triggering the item click
+              if (confirm(`Delete "${location}" from saved locations?`)) {
+                try {
+                  const deleteResponse = await fetch('/api/saved-locations', {
+                    method: 'DELETE',
+                    headers: {
+                      'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ location_text: location }),
+                  });
+                  
+                  if (deleteResponse.ok) {
+                    // Reload the list
+                    loadSavedLocations();
+                  } else {
+                    const data = await deleteResponse.json();
+                    alert(data.error || 'Failed to delete location');
+                  }
+                } catch (err) {
+                  console.error('Error deleting location:', err);
+                  alert('Error deleting location');
+                }
+              }
+            });
+            
+            item.appendChild(text);
+            item.appendChild(deleteBtn);
+            savedLocationsContainer.appendChild(item);
           });
         }
       }
     } catch (err) {
       console.error('Error loading saved locations:', err);
+      savedLocationsContainer.innerHTML = '<div class="saved-locations-empty text-danger">Error loading saved locations</div>';
     }
   }
 
   // Load saved locations on page load
   loadSavedLocations();
-
-  // Handle dropdown selection - autofill search bar
-  savedLocationsDropdown.addEventListener('change', (e) => {
-    const selectedLocation = e.target.value;
-    if (selectedLocation) {
-      input.value = selectedLocation;
-      // Reset dropdown to default option
-      savedLocationsDropdown.value = '';
-      // Trigger search automatically
-      form.dispatchEvent(new Event('submit'));
-    }
-  });
 
   // Autocomplete functionality
   async function fetchAutocompleteSuggestions(query) {
