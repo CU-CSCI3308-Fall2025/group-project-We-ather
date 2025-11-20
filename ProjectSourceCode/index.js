@@ -30,14 +30,31 @@ const hbs = handlebars.create({
   }
 });
 
-// Database configuration (from environment; docker compose provides these)
-const dbConfig = {
-  host: process.env.POSTGRES_HOST || 'db',
-  port: Number(process.env.POSTGRES_PORT || 5432),
-  database: process.env.POSTGRES_DB,
-  user: process.env.POSTGRES_USER,
-  password: process.env.POSTGRES_PASSWORD,
-};
+// Database configuration (supports both connection string and individual variables)
+let dbConfig;
+
+if (process.env.DATABASE_URL) {
+  // Render and other platforms often provide DATABASE_URL as a connection string
+  // Format: postgresql://user:password@host:port/database
+  dbConfig = process.env.DATABASE_URL;
+} else {
+  // Fall back to individual environment variables (for Docker/local development)
+  dbConfig = {
+    host: process.env.POSTGRES_HOST || 'db',
+    port: Number(process.env.POSTGRES_PORT || 5432),
+    database: process.env.POSTGRES_DB,
+    user: process.env.POSTGRES_USER,
+    password: process.env.POSTGRES_PASSWORD,
+  };
+  
+  // Validate that required fields are present
+  if (!dbConfig.database || !dbConfig.user || !dbConfig.password) {
+    console.error('Database configuration error: Missing required environment variables.');
+    console.error('Required: POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD');
+    console.error('Or provide: DATABASE_URL (connection string)');
+    process.exit(1);
+  }
+}
 
 const db = pgp(dbConfig);
 
@@ -651,12 +668,31 @@ module.exports = app;
 
 // Start server if this is the main module
 if (require.main === module) {
-  ensureSchema()
+  // Test database connection first with a simple query
+  db.one('SELECT NOW()')
     .then(() => {
-      app.listen(3000, () => console.log('Server listening on 3000'));
+      console.log('Database connection successful');
+      return ensureSchema();
+    })
+    .then(() => {
+      console.log('Database schema initialized');
+      const PORT = process.env.PORT || 3000;
+      app.listen(PORT, () => console.log(`Server listening on port ${PORT}`));
     })
     .catch((e) => {
-      console.error('Failed to init schema:', e.message);
+      console.error('Database connection or schema initialization failed:');
+      console.error('Error:', e.message);
+      if (e.message.includes('password authentication failed')) {
+        console.error('\nTroubleshooting:');
+        console.error('1. Check that DATABASE_URL or individual POSTGRES_* variables are set correctly');
+        console.error('2. Verify database credentials in Render dashboard');
+        console.error('3. Ensure the database is accessible from your Render service');
+        console.error('4. If using DATABASE_URL, format should be: postgresql://user:password@host:port/database');
+      } else if (e.message.includes('does not exist')) {
+        console.error('\nTroubleshooting:');
+        console.error('1. Verify the database name in your connection string/variables');
+        console.error('2. Check that the database exists in Render');
+      }
       process.exit(1);
     });
 }
