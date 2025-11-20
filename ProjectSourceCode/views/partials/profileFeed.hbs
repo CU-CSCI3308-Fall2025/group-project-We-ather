@@ -35,6 +35,14 @@
     return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
   }
 
+  // Function to escape HTML to prevent XSS
+  function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
   // Function to render posts
   function renderPosts(posts) {
     const container = document.getElementById('feed-container');
@@ -43,31 +51,42 @@
       return;
     }
 
-    const postsHtml = posts.map(post => `
+    const postsHtml = posts.map(post => {
+      const postId = post.id;
+      const escapedContent = escapeHtml(post.content || '');
+      return `
       <div class="col-md-6 col-lg-4 mt-4">
-        <div class="card shadow-sm h-100">
+        <div class="card shadow-sm h-100" data-post-id="${postId}">
           ${post.image_filename ? `<img src="/uploads/${post.image_filename}" class="card-img-top" alt="Weather photo" style="height: 200px; object-fit: cover;">` : ''}
           <div class="card-body d-flex flex-column">
-            ${post.content ? `<p class="card-text">${post.content}</p>` : ''}
+            <div class="post-content-container" data-post-id="${postId}">
+              ${post.content ? `<p class="card-text post-content">${escapedContent}</p>` : '<p class="card-text post-content text-muted">No content</p>'}
+            </div>
             <div class="mt-auto">
               <div class="d-flex justify-content-between align-items-center">
                 <small class="text-muted">
-                  <strong>${post.username}</strong>
-                  ${post.location ? ` • ${post.location}` : ''}
+                  <strong>${escapeHtml(post.username)}</strong>
+                  ${post.location ? ` • ${escapeHtml(post.location)}` : ''}
                   <br>
                   <span class="text-muted">${formatDate(post.created_at)}</span>
                 </small>
                 ${post.can_delete ? `
-                  <button class="btn btn-sm btn-outline-danger delete-post-btn" data-post-id="${post.id}" title="Delete post">
-                    <i class="bi bi-trash"></i>
-                  </button>
+                  <div class="btn-group" role="group">
+                    <button class="btn btn-sm btn-outline-primary edit-post-btn" data-post-id="${postId}" title="Edit post">
+                      <i class="bi bi-pencil"></i>
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger delete-post-btn" data-post-id="${postId}" title="Delete post">
+                      <i class="bi bi-trash"></i>
+                    </button>
+                  </div>
                 ` : ''}
               </div>
             </div>
           </div>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     container.innerHTML = `<div class="row">${postsHtml}</div>`;
   }
@@ -121,6 +140,146 @@
 
   // Expose loadPosts globally so search can call it
   window.loadPostsByLocation = loadPosts;
+
+  // Handle edit post buttons
+  document.addEventListener('click', async (e) => {
+    if (e.target.closest('.edit-post-btn')) {
+      const btn = e.target.closest('.edit-post-btn');
+      const postId = btn.getAttribute('data-post-id');
+      
+      if (!postId) return;
+
+      const contentContainer = document.querySelector(`.post-content-container[data-post-id="${postId}"]`);
+      if (!contentContainer) return;
+
+      const contentElement = contentContainer.querySelector('.post-content');
+      const currentContent = contentElement ? contentElement.textContent : '';
+
+      // Check if already in edit mode
+      if (contentContainer.querySelector('.edit-form')) {
+        return;
+      }
+
+      // Create edit form
+      const editForm = document.createElement('div');
+      editForm.className = 'edit-form';
+      editForm.innerHTML = `
+        <textarea class="form-control mb-2 edit-content-textarea" rows="3" style="min-height: 80px;">${escapeHtml(currentContent)}</textarea>
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-success save-edit-btn" data-post-id="${postId}">
+            <i class="bi bi-check"></i> Save
+          </button>
+          <button class="btn btn-sm btn-secondary cancel-edit-btn" data-post-id="${postId}">
+            <i class="bi bi-x"></i> Cancel
+          </button>
+        </div>
+      `;
+
+      // Replace content with edit form
+      contentContainer.innerHTML = '';
+      contentContainer.appendChild(editForm);
+
+      // Focus on textarea
+      const textarea = editForm.querySelector('.edit-content-textarea');
+      if (textarea) {
+        textarea.focus();
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+      }
+    }
+
+    // Handle save edit
+    if (e.target.closest('.save-edit-btn')) {
+      const btn = e.target.closest('.save-edit-btn');
+      const postId = btn.getAttribute('data-post-id');
+      
+      if (!postId) {
+        console.error('Post ID not found');
+        alert('Error: Post ID not found');
+        return;
+      }
+
+      const contentContainer = document.querySelector(`.post-content-container[data-post-id="${postId}"]`);
+      if (!contentContainer) {
+        console.error('Content container not found for post ID:', postId);
+        return;
+      }
+
+      const textarea = contentContainer.querySelector('.edit-content-textarea');
+      if (!textarea) {
+        console.error('Textarea not found');
+        return;
+      }
+
+      const newContent = textarea.value.trim();
+      
+      // Validate postId is a number
+      const postIdNum = parseInt(postId, 10);
+      if (isNaN(postIdNum) || postIdNum <= 0) {
+        console.error('Invalid post ID:', postId);
+        alert('Error: Invalid post ID');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check"></i> Save';
+        return;
+      }
+      
+      const url = `/api/posts/${postIdNum}`;
+      console.log('Updating post:', { postId, postIdNum, url, content: newContent });
+
+      // Disable button during save
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+
+      try {
+        const response = await fetch(url, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ content: newContent })
+        });
+
+        // Check if response is JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          const text = await response.text();
+          console.error('Non-JSON response received:', response.status, response.statusText, text.substring(0, 200));
+          alert(`Error: Server returned ${response.status} ${response.statusText}. Please check the console for details.`);
+          btn.disabled = false;
+          btn.innerHTML = '<i class="bi bi-check"></i> Save';
+          return;
+        }
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+          // Reload posts after successful update
+          await loadPosts(currentFilter);
+        } else {
+          const errorMsg = data.error || data.message || 'Failed to update post';
+          console.error('Update post error:', errorMsg, data);
+          alert(errorMsg);
+          btn.disabled = false;
+          btn.innerHTML = '<i class="bi bi-check"></i> Save';
+        }
+      } catch (error) {
+        console.error('Error updating post:', error);
+        alert('Error updating post: ' + error.message);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check"></i> Save';
+      }
+    }
+
+    // Handle cancel edit
+    if (e.target.closest('.cancel-edit-btn')) {
+      const btn = e.target.closest('.cancel-edit-btn');
+      const postId = btn.getAttribute('data-post-id');
+      
+      if (!postId) return;
+
+      // Reload posts to restore original content
+      await loadPosts(currentFilter);
+    }
+  });
 
   // Handle delete post buttons
   document.addEventListener('click', async (e) => {

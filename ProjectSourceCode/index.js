@@ -182,6 +182,10 @@ app.use(
 // Simple auth guard
 const auth = (req, res, next) => {
   if (!req.session.user) {
+    // For API routes, return JSON error instead of redirecting
+    if (req.path.startsWith('/api/')) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
     return res.redirect('/login');
   }
   next();
@@ -469,6 +473,59 @@ app.get('/api/posts', auth, async (req, res) => {
   } catch (error) {
     console.error('Error fetching posts:', error);
     res.status(500).json({ error: 'Failed to fetch posts' });
+  }
+});
+
+// Update a post (protected by auth, only post owner can update)
+app.put('/api/posts/:id', auth, async (req, res) => {
+  console.log('PUT /api/posts/:id route hit', req.params.id, req.method, req.path);
+  try {
+    const postId = parseInt(req.params.id);
+    const userId = req.session.user.id;
+    const { content } = req.body;
+
+    // First, check if the post exists and belongs to the user
+    const post = await db.oneOrNone('SELECT * FROM posts WHERE id = $1', [postId]);
+    
+    if (!post) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    if (post.user_id !== userId) {
+      return res.status(403).json({ error: 'You can only edit your own posts' });
+    }
+
+    // Validate that content field is provided (can be empty string, but must be present)
+    if (content === undefined) {
+      return res.status(400).json({ error: 'Content field is required' });
+    }
+
+    // Normalize content: trim whitespace, but keep the string (don't convert to null unless truly empty)
+    const normalizedContent = typeof content === 'string' ? content.trim() : String(content || '').trim();
+
+    // Ensure post still has either content or an image after update
+    // Only check this if normalizedContent is empty (after trim)
+    if (normalizedContent === '' && !post.image_filename) {
+      return res.status(400).json({ error: 'Post must have either content or an image' });
+    }
+
+    // Update the post content (use null for empty string to match database schema)
+    const contentToSave = normalizedContent === '' ? null : normalizedContent;
+    await db.none('UPDATE posts SET content = $1 WHERE id = $2', [contentToSave, postId]);
+
+    // Fetch the updated post with username
+    const updatedPost = await db.one(`
+      SELECT p.*, u.username 
+      FROM posts p 
+      JOIN users u ON p.user_id = u.id 
+      WHERE p.id = $1
+    `, [postId]);
+
+    res.json({ success: true, post: updatedPost });
+  } catch (error) {
+    console.error('Error updating post:', error);
+    console.error('Error stack:', error.stack);
+    res.status(500).json({ error: 'Failed to update post', message: error.message });
   }
 });
 
