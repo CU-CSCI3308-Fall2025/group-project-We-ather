@@ -35,7 +35,7 @@ const dbConfig = {
   host: process.env.POSTGRES_HOST || 'db',
   port: Number(process.env.POSTGRES_PORT || 5432),
   database: process.env.POSTGRES_DB || "users_db",
-  user: process.env.POSTGRES_USER || "postgres",
+  user: process.env.POSTGRES_USER || "postgres1",
   password: process.env.POSTGRES_PASSWORD || "pwd",
 };
 
