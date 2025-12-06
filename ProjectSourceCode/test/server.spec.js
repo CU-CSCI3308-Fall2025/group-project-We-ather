@@ -62,6 +62,48 @@ describe('Testing Add User API', () => {
   });
 });
 
+describe('Testing User Login', () => {
+  it('positive : /login with valid credentials', done => {
+    const username = `loginuser_${Date.now()}`;
+    const password = 'loginpass123';
+
+    chai
+      .request(app)
+      .post('/register')
+      .send({ username, password })
+      .end((err, res) => {
+        chai
+          .request(app)
+          .post('/login')
+          .send({ username, password })
+            .end((err, res) => {
+            expect(res).to.have.status(200);
+            done();
+          });
+      });
+  });
+
+  it('negative : /login with wrong password', done => {
+    const username = `loginuser_${Date.now()}_bad`;
+    const password = 'loginpass123';
+
+    chai
+      .request(app)
+      .post('/register')
+      .send({ username, password })
+      .end((err, res) => {
+        chai
+          .request(app)
+          .post('/login')
+          .send({ username, password: 'wrongpassword' })
+          .end((err, res) => {
+            expect(res).to.have.status(401);
+            done();
+          });
+      });
+  });
+});
+
 // it('GET /api/weather has code 200', function (done) {
 //   this.timeout(10000);
 
